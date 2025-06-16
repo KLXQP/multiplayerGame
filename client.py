@@ -6,11 +6,16 @@ from websockets import connect
 import json
 import time
 from threading import Thread
+import requests
+import pygame_gui
+
+print("modules initialized")
 
 global q
 q = asyncio.Queue()
 delay = 0.3
 
+print("queue created ")
 
 def startLoop(loop):
 	asyncio.set_event_loop(loop)
@@ -18,7 +23,50 @@ def startLoop(loop):
 
 
 
+#---------------------------------------------------------------------------------
+#Requests code
+BulletSpeed = None
+GameId = None
+def joinGame():
+	print("Joingame function started ")
+	data = {
 
+	"name": "Akramthagoat", 
+	"gameId" : input("input the ID for the game session: ")
+	}
+	url = "http://192.168.0.90:3000/game/join"
+	response = requests.post(url, json = data)
+	return response
+def CreateGame():
+	print("createGame function started")
+	global Bspeed
+	Bspeed = int(input("input the Bullet speed: "))
+	data = {
+	"name": "Akramthagoat",
+	"bulletSpeed" : Bspeed
+	}
+	url = "http://192.168.0.90:3000/game/create"
+	response = requests.post(url, json = data)
+	print(response.text)
+	return response
+
+
+while True:
+	action = str(input("What do you wanna do ? \n input( join ) to join a game \n input( create ) to create a game \n"))
+	if action == 'join':
+		response = joinGame()
+		print(response.text)
+		if response.json().get('success') == True:
+			global Bspeed
+			Bspeed = response.json().get('game').get('bulletSpeed')
+			GameId = response.json().get('game').get('id')
+
+	if action ==  'create':
+		if response.json().get('success') == True:
+			response = CreateGame()
+			creatorId = response.json.get('game').get('creator_id')
+			GameId = response.json().get('game').get('id')
+			
 
 #-----------------------------------------------------------------------------------
 #websocket code
@@ -71,7 +119,7 @@ PlayerSpeed = 100
 
 Bulletwidth = 10
 BulletHeight = 2
-BulletSpeed = 500
+BulletSpeed = Bspeed
 
 class GameObj:
 	def __init__(self, x, y, type, speed,   width=None, height=None):
@@ -144,60 +192,58 @@ class Player(GameObj):
 
 midY = int(worldCoords[1] // 2)
 
-Player1 = Player(PlayerDistance, midY, "same", PlayerSpeed, 20/PlayerSpeed, PlayerWidth, PlayerHeight)
-Player2 = Player(worldCoords[0]-(PlayerDistance + PlayerWidth), midY,"other", PlayerSpeed, 20/PlayerSpeed, PlayerWidth, PlayerHeight)
-
 clock = pygame.time.Clock()
-players = [Player1, Player2]
-healthbars = [Healthbar(player) for player in players]
-bullets = []
-running = True
 
+Manager = pygame_gui.UIManager(dim)
 
-lastFire = 0
+def Rungame():
+	Player1 = Player(PlayerDistance, midY, "same", PlayerSpeed, 20/PlayerSpeed, PlayerWidth, PlayerHeight)
+	Player2 = Player(worldCoords[0]-(PlayerDistance + PlayerWidth), midY,"other", PlayerSpeed, 20/PlayerSpeed, PlayerWidth, PlayerHeight)
+	players = [Player1, Player2]
+	healthbars = [Healthbar(player) for player in players]
+	bullets = []
+	lastFire = 0
+	running = True
+	while running:
+		global dt
+		dt = clock.tick(60) / 1000
+		for e in pygame.event.get():
+			if e.type == pygame.QUIT:
+				running = False
+		keys = pygame.key.get_pressed()
 
-while running:
-	global dt
-	dt = clock.tick(60) / 1000
-	for e in pygame.event.get():
-		if e.type == pygame.QUIT:
-			running = False
-	keys = pygame.key.get_pressed()
-
-	if keys[pygame.K_LEFT]:
-		Player1.move("Left")
-	if keys[pygame.K_RIGHT]:
-		Player1.move("Right")
-	if keys[pygame.K_UP]:
-		Player2.move("Left")
-	if keys[pygame.K_DOWN]:
-		Player2.move("Right")
-	if keys[pygame.K_SPACE] and time.time() - lastFire >= delay:
-		bullets.append( Bullet(Player1.x + PlayerWidth, Player1.y+ PlayerHeight/2,Bulletwidth, BulletHeight,BulletSpeed,"same" ) )
-		lastFire = time.time()
-	screen.fill("WHITE")
-
-	
-	asyncio.run_coroutine_threadsafe(q.put(Player1.y), loop)
-
-	if data:
-		Player2.y = int(math.floor(float(data)))
-
-	
-	objects = players + bullets
-	for object in objects:
-		if isinstance(object, Bullet):
-			object.update()
-		object.draw()
-
-
-	for healthbar in healthbars:
-		healthbar.draw()
-
-
-	pygame.display.flip()
+		if keys[pygame.K_LEFT]:
+			Player1.move("Left")
+		if keys[pygame.K_RIGHT]:
+			Player1.move("Right")
+		if keys[pygame.K_UP]:
+			Player2.move("Left")
+		if keys[pygame.K_DOWN]:
+			Player2.move("Right")
+		if keys[pygame.K_SPACE] and time.time() - lastFire >= delay:
+			bullets.append( Bullet(Player1.x + PlayerWidth, Player1.y+ PlayerHeight/2,Bulletwidth, BulletHeight,BulletSpeed,"same" ) )
+			lastFire = time.time()
+		screen.fill("WHITE")
 
 		
-		
+		asyncio.run_coroutine_threadsafe(q.put(Player1.y), loop)
 
-pygame.quit()
+		if data:
+			Player2.y = int(math.floor(float(data)))
+
+		
+		objects = players + bullets
+		for object in objects:
+			if isinstance(object, Bullet):
+				object.update()
+			object.draw()
+
+
+		for healthbar in healthbars:
+			healthbar.draw()
+
+
+		pygame.display.flip()
+
+			
+def StartMenu():

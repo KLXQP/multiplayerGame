@@ -11,47 +11,42 @@ import requests
 import sys
 import queue
 
+# Global variables
 PlayerId = None
 OwnerId = None
 GameId = None
 BulletSpeed = None
 MaxHealth = None
-print("modules initialized")
-
-# ✅ Replace asyncio.Queue with thread-safe queue.Queue
-q = queue.Queue()
-dataLock = threading.Lock()
 delay = 0.3
 
+print("modules initialized")
+
+# Thread-safe queues
+q = queue.Queue()
 dataQ = queue.Queue()
+dataLock = threading.Lock()
+
 print("queue created")
 
+# Start asyncio loop in a new thread
+loop = asyncio.new_event_loop()
 def startLoop(loop):
     asyncio.set_event_loop(loop)
     loop.run_forever()
 
-# ---------------------------------------------------------------------------------
-
-# Websocket code
-global loop
-loop = asyncio.new_event_loop()
-
 t = Thread(target=startLoop, args=(loop,), daemon=True)
 
+# WebSocket handlers
 async def recieve(websocket):
-    global data
     while True:
         Recieved = await websocket.recv()
         data = json.loads(Recieved)
         print(data)
-        if data['type'] == "update":
-            print(data)
-            if data['message'] == "game started":
-                pygameT = Thread(target=Rungame, daemon=False)
-                pygameT.start()
+        if data['type'] == "update" and data['message'] == "game started":
+            pygameT = Thread(target=Rungame, daemon=False)
+            pygameT.start()
         dataQ.put(data)
 
-# ✅ run_in_executor for thread-safe q.get()
 async def sendPos(websocket):
     loop_in_thread = asyncio.get_running_loop()
     while True:
@@ -62,9 +57,7 @@ async def client():
     async with connect("ws://192.168.0.90:3000/game/play") as websocket:
         await asyncio.gather(sendPos(websocket), recieve(websocket))
 
-# ----------------------------------------------------------------------------------
-# Pygame code
-
+# Pygame & Game Logic
 worldCoords = (1000, 700)
 dim = (500, 350)
 
@@ -76,12 +69,11 @@ Bulletwidth = 10
 BulletHeight = 2
 
 midY = int(worldCoords[1] // 2)
-
 clock = pygame.time.Clock()
 
 def Rungame():
-    global data
     screen = pygame.display.set_mode(dim)
+
     class GameObj:
         def __init__(self, x, y, type, speed, width=None, height=None):
             self.type = type
@@ -90,10 +82,6 @@ def Rungame():
             self.speed = speed
             self.width = width
             self.height = height
-        def update(self):
-            pass
-        def draw(self):
-            pass
         def CTP(self):
             Px = int(self.x * dim[0] / worldCoords[0])
             Py = int(self.y * dim[1] / worldCoords[1])
@@ -107,18 +95,16 @@ def Rungame():
         def __init__(self, x, y, width, height, speed, type):
             super().__init__(x, y, type, speed, width, height)
         def draw(self):
-            color = "Green" if self.type == "same" else "red"
-            pygame.draw.rect(screen, color, pygame.Rect(self.CTP()[0], self.CTP()[1], self.CTP()[2], self.CTP()[3]))
+            color = "Green" if self.type == "same" else "Red"
+            pygame.draw.rect(screen, color, pygame.Rect(*self.CTP()))
         def update(self):
             self.x += self.speed * dt if self.type == "same" else -self.speed * dt
-            self.position = (self.x, self.y)
 
     class Healthbar:
         def __init__(self, Parent):
             self.Parent = Parent
         def draw(self):
-            Parentx = self.Parent.CTP()[0]
-            Parenty = self.Parent.CTP()[1]
+            Parentx, Parenty = self.Parent.CTP()[:2]
             color = "green" if self.Parent.type == "same" else "red"
             offset = 0 if self.Parent.type == "same" else -32
             pygame.draw.rect(screen, color, pygame.Rect(Parentx + offset, Parenty - 10, self.Parent.health / 100 * PlayerWidth, 10))
@@ -128,34 +114,30 @@ def Rungame():
             super().__init__(x, y, type, speed, width, height)
             self.health = health
             self.strength = strength
-            self.position = (self.x, self.y)
             self.sprite = sprite
         def move(self, direction):
             if direction == "Left":
                 self.y -= self.speed * dt
                 if self.type == "same":
-                    MoveDataDict = {'type': 'action', 'action_type': 'MOVE_UP', 'gameId': GameId, 'playerId': PlayerId}
-                    MoveData = json.dumps(MoveDataDict)
-                    q.put(MoveData)
+                    q.put(json.dumps({'type': 'action', 'action_type': 'MOVE_UP', 'gameId': GameId, 'playerId': PlayerId}))
             elif direction == "Right":
                 self.y += self.speed * dt
                 if self.type == "same":
-                    MoveDataDict = {'type': 'action', 'action_type': 'MOVE_DOWN', 'gameId': GameId, 'playerId': PlayerId}
-                    MoveData = json.dumps(MoveDataDict)
-                    q.put(MoveData)
-            self.position = (self.x, self.y)
+                    q.put(json.dumps({'type': 'action', 'action_type': 'MOVE_DOWN', 'gameId': GameId, 'playerId': PlayerId}))
         def draw(self):
-            screen.blit(self.sprite, (self.CTP()[0], self.CTP()[1]))
+            screen.blit(self.sprite, self.CTP()[:2])
 
+    # Load sprites
     GoatSprite = pygame.transform.rotate(pygame.image.load('you.png').convert_alpha(), -90)
     TrashSprite = pygame.transform.rotate(pygame.image.load('enemy.png').convert_alpha(), 90)
     MySprite = pygame.transform.scale(GoatSprite, (PlayerWidth * dim[0] // worldCoords[0], PlayerHeight * dim[1] // worldCoords[1]))
     OtherSprite = pygame.transform.scale(TrashSprite, (PlayerWidth * dim[0] // worldCoords[0], PlayerHeight * dim[1] // worldCoords[1]))
-    Player1 = Player(MySprite, PlayerDistance, int(midY), "same", PlayerSpeed, 20, PlayerWidth, PlayerHeight, MaxHealth)
+
+    Player1 = Player(MySprite, PlayerDistance, midY, "same", PlayerSpeed, 20, PlayerWidth, PlayerHeight, MaxHealth)
     Player2 = Player(OtherSprite, worldCoords[0]-(PlayerDistance + PlayerWidth), midY, "other", PlayerSpeed, 20, PlayerWidth, PlayerHeight, MaxHealth)
 
     players = [Player1, Player2]
-    healthbars = [Healthbar(player) for player in players]
+    healthbars = [Healthbar(p) for p in players]
     bullets = []
     lastFire = 0
     running = True
@@ -163,20 +145,17 @@ def Rungame():
     while running:
         global dt
         dt = clock.tick(60) / 1000
+
         for e in pygame.event.get():
             if e.type == pygame.QUIT:
                 running = False
 
         keys = pygame.key.get_pressed()
-        if keys[pygame.K_LEFT]:
-            Player1.move("Left")
-        if keys[pygame.K_RIGHT]:
-            Player1.move("Right")
+        if keys[pygame.K_LEFT]: Player1.move("Left")
+        if keys[pygame.K_RIGHT]: Player1.move("Right")
         if keys[pygame.K_SPACE] and time.time() - lastFire >= delay:
             bullets.append(Bullet(Player1.x + PlayerWidth, Player1.y + PlayerHeight/2, Bulletwidth, BulletHeight, BulletSpeed, "same"))
-            FireDataDict = {'type': 'action', 'action_type': 'FIRE', 'gameId': GameId, 'playerId': PlayerId}
-            FireData = json.dumps(FireDataDict)
-            q.put(FireData)
+            q.put(json.dumps({'type': 'action', 'action_type': 'FIRE', 'gameId': GameId, 'playerId': PlayerId}))
             lastFire = time.time()
 
         screen.fill("WHITE")
@@ -184,55 +163,105 @@ def Rungame():
         while not dataQ.empty():
             Message = dataQ.get()
             if Message["type"] == "action":
-                if Message["action"]["action_type"] == "MOVE_UP":
-                    Player2.move("Left")
-                elif Message["action"]["action_type"] == "MOVE_DOWN":
-                    Player2.move("Right")
+                if Message["action"]["action_type"] == "MOVE_UP": Player2.move("Left")
+                elif Message["action"]["action_type"] == "MOVE_DOWN": Player2.move("Right")
                 elif Message["action"]["action_type"] == "FIRE":
                     bullets.append(Bullet(Player2.x, Player2.y + PlayerHeight/2, Bulletwidth, BulletHeight, BulletSpeed, "other"))
 
-        objects = players + bullets
-        playerect = pygame.Rect(Player1.CTP()[0], Player1.CTP()[1], Player1.CTP()[2], Player1.CTP()[3])
-        Opponentrect = pygame.Rect(Player2.CTP()[0], Player2.CTP()[1], Player2.CTP()[2], Player2.CTP()[3])
-        for obj in objects:
-            obj.draw()
+        for obj in players + bullets: obj.draw()
 
+        playerect = pygame.Rect(*Player1.CTP())
+        opponentrect = pygame.Rect(*Player2.CTP())
         BTR = []
+
         for bullet in bullets:
             bullet.update()
-            bulletRect = pygame.Rect(bullet.CTP()[0], bullet.CTP()[1], bullet.CTP()[2], bullet.CTP()[3])
-            if bullet.type == "other" and playerect.colliderect(bulletRect):
+            bulletrect = pygame.Rect(*bullet.CTP())
+            if bullet.type == "other" and playerect.colliderect(bulletrect):
                 Player1.health -= Player2.strength
                 BTR.append(bullet)
-            elif bullet.type == "same" and Opponentrect.colliderect(bulletRect):
+            elif bullet.type == "same" and opponentrect.colliderect(bulletrect):
                 Player2.health -= Player1.strength
                 BTR.append(bullet)
             if bullet.x < 0 or bullet.x > worldCoords[0]:
                 BTR.append(bullet)
+
         for bullet in BTR:
             bullets.remove(bullet)
 
-        if Player1.health == 0:
+        if Player1.health <= 0:
             print('\nYou lose')
             pygame.quit()
             sys.exit()
-        if Player2.health == 0:
+        if Player2.health <= 0:
             running = False
             pygame.quit()
             print("\nYOU WIN")
             continue
 
-        for healthbar in healthbars:
-            healthbar.draw()
+        for hb in healthbars:
+            hb.draw()
 
         pygame.display.flip()
 
-# ----------------------------------------
-# Requests and Menu code — unchanged
-# (since this part was fine)
+# REST API helpers
+def joinGame(id=None):
+    global GameId, BulletSpeed, PlayerId, MaxHealth
+    if id is None:
+        GameId = input('Input the gameID: ')
+    else:
+        GameId = id
+    data = {"name": input("Your name: "), "gameId": GameId}
+    response = requests.post("http://192.168.0.90:3000/game/join", json=data)
+    rdata = response.json()
+    if rdata.get('success'):
+        BulletSpeed = rdata['game']['bulletSpeed']
+        PlayerId = rdata['player']['id']
+        MaxHealth = rdata['player']['health']
+        print(f"Game Joined: BulletSpeed={BulletSpeed}, PlayerId={PlayerId}, Health={MaxHealth}")
 
-# same as your existing CreateGame, joinGame, and StartMenu functions
+def CreateGame():
+    global GameId, BulletSpeed, PlayerId, MaxHealth
+    BulletSpeed = int(input("Bullet speed: "))
+    data = {"name": input("Your name: "), "bulletSpeed": BulletSpeed}
+    response = requests.post("http://192.168.0.90:3000/game/create", json=data)
+    rdata = response.json()
+    if rdata.get('success'):
+        GameId = rdata['game']['id']
+        PlayerId = rdata['player']['id']
+        MaxHealth = rdata['player']['health']
+        print(f"Game Created: GameId={GameId}, PlayerId={PlayerId}, Health={MaxHealth}")
 
-# ----------------------------------------
+# Game Menu
+def StartMenu():
+    ready = False
+    while True:
+        if not ready:
+            action = input("What do you wanna do? (join/create): ").strip()
+            if action == 'join':
+                joinGame()
+                t.start()
+                asyncio.run_coroutine_threadsafe(client(), loop)
+                input("Press enter when ready")
+                initData = json.dumps({"type": "action", "action_type": "INIT", "gameId": GameId, "playerId": PlayerId})
+                q.put(initData)
+                ready = True
+            elif action == 'create':
+                CreateGame()
+                t.start()
+                asyncio.run_coroutine_threadsafe(client(), loop)
+                initData = json.dumps({"type": "action", "action_type": "INIT", "gameId": GameId, "playerId": PlayerId})
+                q.put(initData)
+                ready = True
+            else:
+                print("invalid action")
+        elif ready and action == "create":
+            input("Press enter to start the game")
+            startData = json.dumps({"type": "action", "action_type": "START_GAME", "gameId": GameId, "playerId": PlayerId})
+            q.put(startData)
+            time.sleep(1)
+        elif ready and action == "join":
+            continue
 
+# Start program
 StartMenu()

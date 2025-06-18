@@ -179,25 +179,25 @@ def Rungame():
             bulletrect = pygame.Rect(*bullet.CTP())
             if bullet.type == "other" and playerect.colliderect(bulletrect):
                 Player1.health -= Player2.strength
+                Player1.health = max(0, Player1.health)  # clamp to zero
                 BTR.append(bullet)
+                if Player1.health <= 0:
+                    print('\nYou lose')
+                    pygame.quit()
+                    sys.exit()
             elif bullet.type == "same" and opponentrect.colliderect(bulletrect):
                 Player2.health -= Player1.strength
+                Player2.health = max(0, Player2.health)  # clamp to zero
                 BTR.append(bullet)
+                if Player2.health <= 0:
+                    print("\nYOU WIN")
+                    pygame.quit()
+                    sys.exit()
             if bullet.x < 0 or bullet.x > worldCoords[0]:
                 BTR.append(bullet)
 
         for bullet in BTR:
             bullets.remove(bullet)
-
-        if Player1.health <= 0:
-            print('\nYou lose')
-            pygame.quit()
-            sys.exit()
-        if Player2.health <= 0:
-            running = False
-            pygame.quit()
-            print("\nYOU WIN")
-            continue
 
         for hb in healthbars:
             hb.draw()
